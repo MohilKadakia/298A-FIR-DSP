@@ -1,17 +1,17 @@
 # Tiny Tapeout project information
 project:
-  title:        ""      # Project title
-  author:       ""      # Your name
-  discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
-  description:  ""      # One line description of what your project does
+  title:        "TinyFIR: SPI-Programmable 8-Tap FIR Filter" # Project title
+  author:       "Hamza Soofi, Gurpal Johal, Mohil Kadakia, Ayaan Tunio" # Your name
+  discord:      "Gurpal, Yaboihazmat, mohil0, souprage"      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
+  description:  "Programmable 8-tap FIR filter with SPI-configurable coefficients" # One line description of what your project does
   language:     "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
   clock_hz:     0       # Clock frequency in Hz (or 0 if not applicable)
 
   # How many tiles your design occupies? A single tile is about 340x160 uM.
-  tiles: "1x1"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 3x4 or 4x4
+  tiles: "1x2"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 3x4 or 4x4
 
   # Your top module name must start with "tt_um_". Make it unique by including your github username:
-  top_module:  "tt_um_example"
+  top_module:  "tt_um_gurpalhamzamohilayaan_tinyfir"
 
   # List your project's source files here.
   # Source files must be in ./src and you must list each source file separately, one per line.
@@ -22,35 +22,36 @@ project:
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
 pinout:
-  # Inputs
-  ui[0]: ""
-  ui[1]: ""
-  ui[2]: ""
-  ui[3]: ""
-  ui[4]: ""
-  ui[5]: ""
-  ui[6]: ""
-  ui[7]: ""
+  # Inputs - Signed 8 - bit sample
+  ui[0]: "sample_in[0]"
+  ui[1]: "sample_in[1]"
+  ui[2]: "sample_in[2]"
+  ui[3]: "sample_in[3]"
+  ui[4]: "sample_in[4]"
+  ui[5]: "sample_in[5]"
+  ui[6]: "sample_in[6]"
+  ui[7]: "sample_in[7]"
 
-  # Outputs
-  uo[0]: ""
-  uo[1]: ""
-  uo[2]: ""
-  uo[3]: ""
-  uo[4]: ""
-  uo[5]: ""
-  uo[6]: ""
-  uo[7]: ""
+  # Outputs - signed 8-bit filtered sample
+  uo[0]: "sample_out[0]"
+  uo[1]: "sample_out[1]"
+  uo[2]: "sample_out[2]"
+  uo[3]: "sample_out[3]"
+  uo[4]: "sample_out[4]"
+  uo[5]: "sample_out[5]"
+  uo[6]: "sample_out[6]"
+  uo[7]: "sample_out[7]"
 
   # Bidirectional pins
-  uio[0]: ""
-  uio[1]: ""
-  uio[2]: ""
-  uio[3]: ""
-  uio[4]: ""
-  uio[5]: ""
-  uio[6]: ""
-  uio[7]: ""
+  uio[0]: "spi_sclk"
+  uio[1]: "spi_mosi"
+  uio[2]: "spi_miso"
+  uio[3]: "spi_cs_n"
+  uio[4]: "sample_strobe"
+  uio[5]: "ready"
+  uio[6]: "output_valid"
+  uio[7]: "saturated"
+
 
 # Do not change!
 yaml_version: 6
