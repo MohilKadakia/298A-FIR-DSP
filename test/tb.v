@@ -1,24 +1,36 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
-/* This testbench just instantiates the module and makes some convenient wires
-   that can be driven / tested by the cocotb test.py.
+/* Instantiates the design with a model of its bidirectional pads and names each
+   pin, so the cocotb tests can drive and trigger on individual signals at both
+   RTL and gate level.
+
+   By default only this top level is dumped to tb.fst, which keeps the file small
+   during long regressions. Build with -DDUMP_ALL for the whole hierarchy.
 */
 module tb ();
 
-  // Dump the signals to a FST file. You can view it with gtkwave or surfer.
   initial begin
     $dumpfile("tb.fst");
+`ifdef DUMP_ALL
     $dumpvars(0, tb);
+`else
+    $dumpvars(1, tb);
+`endif
     #1;
   end
 
-  // Wire up the inputs and outputs:
   reg clk;
   reg rst_n;
   reg ena;
   reg [7:0] ui_in;
-  reg [7:0] uio_in;
+
+  // Signals driven by the external host:
+  reg spi_sclk;
+  reg spi_mosi;
+  reg spi_cs_n;
+  reg sample_strobe;
+
   wire [7:0] uo_out;
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
@@ -27,8 +39,18 @@ module tb ();
   wire VGND = 1'b0;
 `endif
 
-  // Replace tt_um_example with your module name:
-  tt_um_example user_project (
+  // On the chip, each uio input path reads the pad, which reflects the design's
+  // own output when its output enable is high.
+  wire [7:0] uio_host = {3'b000, sample_strobe, spi_cs_n, 1'b0, spi_mosi, spi_sclk};
+  wire [7:0] uio_in = (uio_oe & uio_out) | (~uio_oe & uio_host);
+
+  // Pins as an external device sees them:
+  wire spi_miso = uio_oe[2] ? uio_out[2] : 1'bz;
+  wire ready = uio_out[5];
+  wire output_valid = uio_out[6];
+  wire saturated = uio_out[7];
+
+  tt_um_gurpalhamzamohilayaan_tinyfir user_project (
 
       // Include power ports for the Gate Level test:
 `ifdef GL_TEST

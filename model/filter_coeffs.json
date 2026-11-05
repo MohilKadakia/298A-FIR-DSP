@@ -1,0 +1,92 @@
+{
+  "lowpass": {
+    "coefficients": [
+      0,
+      3,
+      20,
+      41,
+      41,
+      20,
+      3,
+      0
+    ],
+    "analysis_samples": 400,
+    "tones": {
+      "low": 0.05,
+      "high": 0.4
+    },
+    "pass_tones": [
+      "low"
+    ],
+    "stop_tones": [
+      "high"
+    ],
+    "min_pass_db": -2.0,
+    "max_stop_db": -35.0,
+    "response_db": {
+      "low": -0.5,
+      "high": -41.96
+    }
+  },
+  "highpass": {
+    "coefficients": [
+      0,
+      6,
+      -32,
+      52,
+      -32,
+      6,
+      0,
+      0
+    ],
+    "analysis_samples": 400,
+    "tones": {
+      "low": 0.05,
+      "high": 0.4
+    },
+    "pass_tones": [
+      "high"
+    ],
+    "stop_tones": [
+      "low"
+    ],
+    "min_pass_db": -2.0,
+    "max_stop_db": -35.0,
+    "response_db": {
+      "low": -43.65,
+      "high": -1.52
+    }
+  },
+  "bandpass": {
+    "coefficients": [
+      0,
+      -34,
+      0,
+      59,
+      0,
+      -34,
+      0,
+      0
+    ],
+    "analysis_samples": 400,
+    "tones": {
+      "low": 0.05,
+      "mid": 0.25,
+      "high": 0.45
+    },
+    "pass_tones": [
+      "mid"
+    ],
+    "stop_tones": [
+      "low",
+      "high"
+    ],
+    "min_pass_db": -2.0,
+    "max_stop_db": -25.0,
+    "response_db": {
+      "low": -30.13,
+      "mid": -0.07,
+      "high": -30.13
+    }
+  }
+}

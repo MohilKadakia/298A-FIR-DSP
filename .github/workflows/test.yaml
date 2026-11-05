@@ -31,10 +31,18 @@ jobs:
           # make will return success even if the test fails, so check for failed tests in results.xml.
           ! grep -E '<(failure|error)' results.xml
 
+      - name: Run reference model tests
+        run: PYTHONPATH=model pytest model/test_fir_model.py
+
+      - name: Run module-level tests
+        run: make -C test/unit
+
       - name: Test Summary
         uses: test-summary/action@v2.4
         with:
-          paths: "test/results.xml"
+          paths: |
+            test/results.xml
+            test/unit/results_*.xml
         if: always()
 
       - name: upload waveform and test results

@@ -1,42 +1,47 @@
 ![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg) ![](../../workflows/fpga/badge.svg)
 
-# Tiny Tapeout Verilog Project Template
+# TinyFIR: SPI-Programmable 8-Tap FIR Filter
 
-- [Read the documentation for project](docs/info.md)
+TinyFIR is a programmable 8-tap FIR filter for Tiny Tapeout on GF180, in a 1x2 tile. Samples enter on eight parallel pins, coefficients load over SPI, and one shared multiplier and accumulator process the eight taps in turn. Loading different coefficients makes the same hardware a low-pass, high-pass or band-pass filter.
 
-## What is Tiny Tapeout?
+- [Datasheet](docs/info.md): pinout, timing, SPI registers, and how to test the chip
+- [Final report](docs/final_report.md): what was built, verification results, and physical status
+- [Project proposal](docs/project_proposal.md): the original specification
 
-Tiny Tapeout is an educational project that aims to make it easier and cheaper than ever to get your digital and analog designs manufactured on a real chip.
+## Repository layout
 
-To learn more and get started, visit https://tinytapeout.com.
+| Path | Contents |
+|---|---|
+| [src/](src/) | Verilog design. [project.v](src/project.v) is the Tiny Tapeout wrapper and [fir_core.v](src/fir_core.v) connects the blocks. |
+| [model/](model/) | Integer reference model, filter design, and plotting |
+| [test/](test/) | Pin-level cocotb regression, which runs on both RTL and gate-level netlists |
+| [test/unit/](test/unit/) | Module-level tests, including exhaustive arithmetic and SPI sweeps |
+| [scripts/](scripts/) | GF180 synthesis estimate and mutation testing |
+| [docs/](docs/) | Datasheet, report, proposal and figures |
 
-## Set up your Verilog project
+## Running the tests
 
-1. Add your Verilog files to the `src` folder.
-2. Edit the [info.yaml](info.yaml) and update information about your project, paying special attention to the `source_files` and `top_module` properties. If you are upgrading an existing Tiny Tapeout project, check out our [online info.yaml migration tool](https://tinytapeout.github.io/tt-yaml-upgrade-tool/).
-3. Edit [docs/info.md](docs/info.md) and add a description of your project.
-4. Adapt the testbench to your design. See [test/README.md](test/README.md) for more information.
+You need Icarus Verilog and Python 3.11. Install the Python packages with `pip install -r test/requirements.txt`. See [test/README.md](test/README.md) for details.
 
-The GitHub action will automatically build the ASIC files using [LibreLane](https://www.zerotoasiccourse.com/terminology/librelane/).
+```sh
+make -C test                         # system regression, about 30 seconds
+make -C test/unit                    # module tests, a few minutes
+PYTHONPATH=model pytest model        # reference model tests
+```
 
-## Enable GitHub actions to build the results page
+The same three steps run in the `test` workflow on every push. The `gds` workflow builds the chip layout with the official Tiny Tapeout flow, then runs the precheck and repeats the regression on the final gate-level netlist.
 
-- [Enabling GitHub Pages](https://tinytapeout.com/faq/#my-github-action-is-failing-on-the-pages-part)
+## Other tasks
 
-## Resources
+```sh
+pip install -r model/requirements.txt
+python model/design_filters.py       # regenerate model/filter_coeffs.json
+python model/plot_demos.py           # regenerate docs/figures after running the regression
 
-- [FAQ](https://tinytapeout.com/faq/)
-- [Digital design lessons](https://tinytapeout.com/digital_design/)
-- [Learn how semiconductors work](https://tinytapeout.com/siliwiz/)
-- [Join the community](https://tinytapeout.com/discord)
-- [Build your design locally](https://www.tinytapeout.com/guides/local-hardening/)
+scripts/synth_gf180.sh               # area and timing estimate, needs Yosys and the PDK
+scripts/mutation_test.py             # check that the regression catches injected bugs
+```
 
-## What next?
+## About Tiny Tapeout
 
-- [Submit your design to the next shuttle](https://app.tinytapeout.com/).
-- Edit [this README](README.md) and explain your design, how it works, and how to test it.
-- Share your project on your social network of choice:
-  - LinkedIn [#tinytapeout](https://www.linkedin.com/search/results/content/?keywords=%23tinytapeout) [@TinyTapeout](https://www.linkedin.com/company/100708654/)
-  - Mastodon [#tinytapeout](https://chaos.social/tags/tinytapeout) [@matthewvenn](https://chaos.social/@matthewvenn)
-  - X (formerly Twitter) [#tinytapeout](https://twitter.com/hashtag/tinytapeout) [@tinytapeout](https://twitter.com/tinytapeout)
-  - Bluesky [@tinytapeout.com](https://bsky.app/profile/tinytapeout.com)
+Tiny Tapeout is an educational project that makes it easier and cheaper to get digital and analog designs manufactured on a real chip. To learn more, visit https://tinytapeout.com.
