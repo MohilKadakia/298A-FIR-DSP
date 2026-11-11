@@ -10,4 +10,9 @@ src/config_merged.json
 test/sim_build
 test/__pycache__/
 test/results.xml
+test/output
+test/unit/sim_build
+test/unit/__pycache__
+test/unit/results*.xml
+model/__pycache__
 test/gate_level_netlist.v
