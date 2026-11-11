@@ -41,7 +41,7 @@ Times are in cycles of the system clock, `clk`, which targets 10 MHz. Samples ca
 
 `uo_out` and `saturated` update together with the one-clock `output_valid` pulse, and hold until the next result.
 
-Static timing analysis of the final layout meets 10 MHz at all nine signoff corners. The slowest corner supports up to about 11.5 MHz.
+Static timing analysis of the final layout meets 10 MHz at all nine signoff corners. The slowest corner supports up to about 16 MHz.
 
 With fixed coefficients, the filter's response stays the same relative to the sample rate, so its cutoff in hertz moves as the sample rate changes.
 

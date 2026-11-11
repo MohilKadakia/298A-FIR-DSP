@@ -1,7 +1,7 @@
 # TinyFIR Final Report
 
 **Team:** Hamza Soofi, Gurpal Johal, Mohil Kadakia, and Ayaan Tunio  
-**Status:** RTL, simulation and the official Tiny Tapeout flow all pass for commit `c3968f1` (branch `heh`, CI run 42127859566). The layout meets 10 MHz at every signoff corner. Its slow-corner margin is thinner than it needs to be because of a flow buffering choice, described in section 6.
+**Status:** RTL, simulation and the official Tiny Tapeout flow all pass for commit `e200e80` on branch `heh` (CI run 42943449582). The layout meets 10 MHz at every signoff corner with at least 38 ns of setup slack.
 
 ## 1. Summary
 
@@ -13,8 +13,8 @@ TinyFIR is a programmable 8-tap FIR filter for a 1x2 Tiny Tapeout tile on GF180.
 | Sample rate at 10 MHz | 500 ksample/s | Met, with no dropped or duplicated samples | Simulation at random phases |
 | Fastest contract-legal rate at 10 MHz | Not specified | 769 ksample/s (13 clocks per sample) | Simulation at random phases |
 | Random arithmetic against the model | At least 10,000 samples | 10,240 samples, 1,549 of them clipped, all exact | Simulation |
-| Cell area | Fit the 112,783 µm² die | 60,267 µm² of standard cells, 55.8% of the core | Final layout |
-| Timing at 10 MHz (100 ns) | Met at every corner | Met at all 9 corners. Worst setup slack 13.4 ns, worst hold slack 0.19 ns | Post-route static timing |
+| Cell area | Fit the 112,783 µm² die | 57,326 µm² of standard cells, 53.1% of the core | Final layout |
+| Timing at 10 MHz (100 ns) | Met at every corner | Met at all 9 corners. Worst setup slack 38.1 ns, worst hold slack 0.19 ns | Post-route static timing |
 | Physical checks | Pass | Precheck 12 of 12, Magic and KLayout DRC clean, LVS match, no antenna violations | Tiny Tapeout CI |
 
 All 28 system tests pass on RTL, on the post-synthesis netlist, and in CI on the final placed-and-routed netlist.
@@ -39,7 +39,7 @@ For each accepted strobe, the circuit captures the sample, clears the accumulato
 | Wrapper | [project.v](../src/project.v) | 9 | 0 |
 | **Total** | | **38,267** | **215** |
 
-These figures are from area-oriented Yosys synthesis with the `tt_025C_3v30` library, before layout. They exclude the clock tree, repair buffers, and tap cells. The flow's own synthesis came to 40,829 µm², and the final layout to 60,267 µm² (section 6).
+These figures are from area-oriented Yosys synthesis with the `tt_025C_3v30` library, before layout. They exclude the clock tree, repair buffers, and tap cells. The flow's own synthesis came to 40,829 µm², and the final layout to 57,326 µm² (section 6).
 
 ## 3. Decisions the proposal left open
 
@@ -53,7 +53,8 @@ The proposal deferred these choices until implementation.
 | SPI readback | Separate read mux | Reads never disturb a calculation, at a measured cost of about 1,100 µm² |
 | Reset | Asserts asynchronously, releases on a clock edge | All flops leave reset in the same cycle, and gate-level simulation has no X problems |
 | Strobe high through reset | `ready` stays low until the strobe is seen low | A strobe left high never captures a stray sample |
-| Clock constraint | `CLOCK_PERIOD` raised from 20 ns to 100 ns | Matches the 10 MHz target. The signed-off layout needs 86.6 ns at its slowest corner (section 6) |
+| Clock constraint | `CLOCK_PERIOD` raised from 20 ns to 100 ns | Matches the 10 MHz target. The signed-off layout needs 61.9 ns at its slowest corner (section 6) |
+| Delay cells | Excluded from synthesis and place and route with `EXTRA_EXCLUDED_CELLS` | The first CI run showed the layout tool using them as buffers, which cost about 25 ns of slow-corner slack (section 6) |
 
 Two small additions go beyond the proposal: a sticky `STATUS` flag for requests dropped while busy, and a `CONTROL` bit that clears the status flags. Both make host errors visible through the pins.
 
@@ -118,75 +119,78 @@ The limits were set after evaluating the quantized coefficients and before final
 
 ## 6. Physical implementation
 
-The official Tiny Tapeout flow (tt-gds-action `ttgf26c`, LibreLane 3.0.14) hardened commit `c3968f1` in GitHub Actions run 42127859566. Every job passed: `gds`, `precheck`, `gl_test` and `viewer`.
+The official Tiny Tapeout flow (tt-gds-action `ttgf26c`, LibreLane 3.0.14) hardened the design in GitHub Actions. The first run, on commit `c3968f1`, passed but exposed a buffering problem, described below. Commit `e200e80` fixes it with one configuration setting, and its run, 42943449582, is the one reported here. Every job passed: `gds`, `precheck`, `gl_test` and `viewer`.
 
 ![Final layout of the 1x2 tile](figures/layout.png)
 
 | Check | Result |
 |---|---|
-| Tiny Tapeout precheck | 12 of 12 checks pass, including a full KLayout GF180MCU DRC (0 violations across 739 rule categories) and an antenna check |
+| Tiny Tapeout precheck | 12 of 12 checks pass, including the KLayout GF180MCU DRC deck without its density rules (0 violations across 739 rule categories) and an antenna check |
 | Magic DRC | 0 errors |
-| LVS | Circuits match uniquely: 1,960 devices, 1,971 nets and all 45 pins |
+| LVS | Circuits match uniquely: 1,962 devices, 1,973 nets, no unmatched pins |
 | Antenna | 0 violations, no diodes needed |
 | Detailed routing | 0 violations after four iterations |
-| IR drop | 0.09 mV at worst |
-| Power | 4.60 mW at the typical corner, a vectorless estimate |
+| IR drop | Under 0.1 mV on either supply |
+| Power | 4.53 mW at the typical corner, a vectorless estimate |
 | Gate-level test | All 28 system tests pass on the final netlist with power pins |
 
-The gate-level simulation is zero-delay, because the cell models' timing is switched off. It shows that the routed netlist behaves exactly like the RTL, but says nothing about timing, which comes from static timing analysis alone.
+The gate-level simulation is zero-delay, because the cell models' timing is switched off. It shows that the routed netlist passes the same 28 pin-level tests as the RTL, with every output checked exactly. It is not a formal equivalence check, and it says nothing about timing, which comes from static timing analysis alone.
 
 ### Timing
 
-Setup and hold are met at all nine signoff corners, with no violations. The slow corners limit setup and the fast corners limit hold. Every critical path starts at the tap counter, runs through the sample and coefficient selection and the multiplier, and ends in the accumulator.
+Setup and hold are met at all nine signoff corners, with no violations. The slow corners limit setup and the fast corners limit hold. At every corner, the worst register-to-register setup paths start at the tap counter, run through the sample and coefficient selection and the multiplier, and end in the accumulator.
 
 | Corner | Setup slack, register to register | Minimum clock period | Worst hold slack |
 |---|---:|---:|---:|
-| Typical: `nom_tt_025C_3v30` | 58.0 ns | 42.0 ns (23.8 MHz) | 0.54 ns |
-| Slow: `nom_ss_125C_3v00` | 14.8 ns | 85.2 ns (11.7 MHz) | 1.38 ns |
-| Fast: `nom_ff_n40C_3v60` | 76.2 ns | 23.8 ns (42.0 MHz) | 0.19 ns |
-| Slowest of all nine: `max_ss_125C_3v00` | 13.4 ns | 86.6 ns (11.5 MHz) | 1.38 ns |
+| Typical: `nom_tt_025C_3v30` | 69.6 ns | 30.4 ns (32.8 MHz) | 0.54 ns |
+| Slow: `nom_ss_125C_3v00` | 39.5 ns | 60.5 ns (16.5 MHz) | 1.38 ns |
+| Fast: `nom_ff_n40C_3v60` | 82.3 ns | 17.7 ns (56.4 MHz) | 0.19 ns |
+| Slowest of all nine: `max_ss_125C_3v00` | 38.1 ns | 61.9 ns (16.2 MHz) | 1.38 ns |
 
-The worst hold slack over all corners, 0.19 ns at `min_ff_n40C_3v60`, is between the reset synchronizer's two back-to-back flops, which is expected. Paths to and from the pins have at least 54 ns of slack even at the slowest corner.
+The worst hold slack over all corners, 0.19 ns at `min_ff_n40C_3v60`, is between the reset synchronizer's two back-to-back flops, which is expected. Paths to and from the pins have at least 57 ns of setup slack, measured against the flow's default input and output delays of 20% of the clock period (20 ns at 100 ns), and at least 16 ns of hold and removal slack. At the typical and fast corners, the smallest setup slack overall, 58 to 59 ns, is on the `spi_cs_n` to `uio_oe[2]` pin path, because of that delay budget.
 
-### Why the slow-corner margin is thin
+### The delay-cell fix
 
-To fix fanout and slew, the layout tool inserted 146 buffers of type `dlyb_1`, a delay cell. The GF180 library describes it as an ordinary buffer, and in the slow-corner library it ranks as the weakest buffer by 0.06%, so OpenROAD picks it. Ten of these cells sit on the worst path and add 43.6 ns of its 88.3 ns at the slowest corner.
+In the first CI run, while buffering the input pins and fixing fanout, slew and capacitance, the layout tool inserted 146 buffers of type `dlyb_1`, a delay cell. The GF180 library describes it as an ordinary buffer, and in the slow-corner library, which the flow loaded first, it ranks as the weakest buffer by 0.06%. That is the most likely reason OpenROAD picked it for the input and fanout buffers, though we have not confirmed this in the OpenROAD source. Ten of these cells sat on the worst path and made up 43.6 ns of its 88.3 ns at the slowest corner, about 25 ns more than ordinary buffers would take.
 
-Adding the twelve delay cells (`gf180mcu_fd_sc_mcu7t5v0__dlya_1` through `__dlyd_4`) to `EXTRA_EXCLUDED_CELLS` in `src/config.json` would stop this. Estimated from the library's tables, it should give about 25 ns more slow-corner setup slack and save about 3,200 µm². That estimate needs another CI run to confirm. The change is optional, since the layout already meets 10 MHz.
+Commit `e200e80` adds the twelve delay cells (`gf180mcu_fd_sc_mcu7t5v0__dlya_1` through `__dlyd_4`) to `EXTRA_EXCLUDED_CELLS` in `src/config.json`. The second run confirmed the effect. With the delay cells excluded, the tool put `buf_1`, the next weakest buffer, in all 136 input and fanout buffers that had been `dlyb_1`, which fits the explanation above. The other 10 became `clkbuf_1`: six wire, three max-capacitance and one load-slew buffer, including five of the ten on the old worst path. The tool chose those some other way.
+
+| Measure | First run (`c3968f1`) | Second run (`e200e80`) |
+|---|---:|---:|
+| Delay cells in the layout | 146 | 0 |
+| Worst setup slack, slowest corner | 13.4 ns | 38.1 ns |
+| Slowest-corner limit | 11.6 MHz | 16.2 MHz |
+| Typical-corner limit | 23.8 MHz | 32.8 MHz |
+| Standard-cell area | 60,267 µm² | 57,326 µm² |
+| Max-capacitance violations | 2 | 0 |
+| Max-slew pins, slowest corner | 440 | 434 |
+
+The slack gain, 24.7 ns, matches the estimate of about 25 ns made from the library tables before the second run.
 
 ### Electrical rule warnings
 
-The flow reports max-slew, max-capacitance and max-fanout violations, which Tiny Tapeout's configuration does not treat as failures.
+The flow reports max-slew and max-fanout violations as warnings only. By default LibreLane checks slew and capacitance at no corner and has no fanout check, and Tiny Tapeout keeps those defaults.
 
-- **Max slew:** 440 pins exceed the flow's 3 ns limit at the slowest corner, 88 at the typical corner, and none at the fast corners. 98% are on nets driven by the delay-cell buffers, which have only x1 drive. Every slew stays inside the library's characterized range, so the timing above is interpolated, not extrapolated. Excluding the delay cells is not expected to clear these on its own, because the replacement `buf_1` has the same output drive.
-- **Max capacitance:** 2 nets, at 0.208 pF and 0.202 pF against a 0.2 pF limit, and only at the max-RC corners.
-- **Max fanout:** 14 clock-tree leaf buffers each drive 12 to 17 flops against a limit of 10, which is normal for a clock tree.
+- **Max slew:** 434 pins on 45 nets exceed the flow's 3 ns limit at the slowest corner (worst 8.3 ns), 77 pins at the typical corner (worst 4.2 ns), and none at the fast corners. At the slowest corner 96% of them, and at the typical corner all of them, are on nets driven by `buf_1` fanout buffers, which have only x1 drive. None is on a clock net. Every slew stays inside the library's characterized range, which goes up to 15.6 ns at the slow corner, so the timing above is interpolated, not extrapolated.
+- **Max fanout:** 13 clock-tree leaf buffers each have a fanout of 15 to 19, counting the clock tree's dummy loads, against a limit of 10. That is normal for a clock tree.
+- **Max capacitance:** none, down from 2 in the first run.
 
-None of these causes a functional problem at 10 MHz. No clock net is affected, and every setup, hold, recovery and removal check passes.
+None of these causes a functional problem at 10 MHz: every setup, hold, recovery and removal check passes. Clearing the slew warnings would take stronger drivers on those nets, mostly the `buf_1` fanout buffers, though 19 of the 434 pins are on nets driven by logic cells. LibreLane's experimental post-global-route design repair (`RUN_POST_GRT_DESIGN_REPAIR`) might provide them, but it is untested here, and this design does not need it.
 
 ### Area
 
-The flow's synthesis came to 40,829 µm², inside the estimate in section 2. The final 60,267 µm² of standard cells (55.8% of the core) adds 8,535 µm² of repair buffers, 5,591 µm² from upsized cells, 3,806 µm² of tap and endcap cells, and 1,506 µm² of clock tree. Fill takes most of the remaining space.
+The flow's synthesis came to 40,829 µm², about 7% above the 38,267 µm² estimate in section 2. The final 57,326 µm² of standard cells (53.1% of the core) adds 5,655 µm² of repair buffers, 5,591 µm² from resized cells, 3,806 µm² of tap and endcap cells, and 1,444 µm² of clock tree. Fill and decap cells (50,606 µm²) take the rest of the core.
 
 ### Pre-layout estimates against signoff
 
-Before CI ran, a quick synthesis estimate put the critical path at 12.2, 24.6 and 6.9 ns at the typical, slow and fast corners. The signed-off register-to-register paths are 42.0, 85.2 and 23.8 ns, about 3.45 times longer. At the typical corner the gap breaks down roughly as follows:
-
-- 9 ns from the flow's area-oriented synthesis
-- 6 ns of timing terms the estimate left out
-- 4 ns of wire load
-- 14 ns from the delay cells
-- 3 ns saved by buffering
-
-The estimate was good enough to choose the 100 ns constraint, but too optimistic to quote as margin.
+Before CI ran, a quick synthesis estimate put the critical path at 12.2, 24.6 and 6.9 ns at the typical, slow and fast corners. The signed-off register-to-register paths are 30.4, 60.5 and 17.7 ns, about 2.5 times longer, and they were about 3.45 times longer before the delay-cell fix. The rest of the gap comes mainly from the flow's area-oriented synthesis, timing terms the quick estimate left out, and wire load. The estimate was good enough to choose the 100 ns constraint, but too optimistic to quote as margin.
 
 ## 7. Known limits
 
 - **Short `ready` and `output_valid` pulses.** `ready` is low for 9 clocks and `output_valid` lasts 1. A slow polling host can miss both, so the datasheet gives a fixed-delay procedure, which `test_host_too_slow_to_watch_ready` covers.
 - **Reset with SPI active.** If reset releases while chip select is low and SCLK is high, the first SCLK level counts as a clock. A write in that frame is rejected and flagged, so it fails safely. This state is outside SPI mode 0 idle.
 - **Simulation cannot show metastability.** The synchronizers follow standard practice, but only silicon can test them. Gate-level simulation is zero-delay, so timing evidence comes only from static timing analysis.
-- **Slow-corner headroom.** At the slowest corner the layout supports about 11.5 MHz, roughly 15% above the 10 MHz target, until the delay-cell change in section 6 is made.
-- **Electrical warnings.** The max-slew, max-capacitance and max-fanout warnings in section 6 were reviewed and accepted, and they remain in the layout.
+- **Electrical warnings.** The max-slew and max-fanout warnings in section 6 were reviewed and accepted, and they remain in the layout.
 - **No silicon testing.** Testing the chip depends on fabrication and delivery dates.
 
 ## 8. How to reproduce
