@@ -1,15 +1,10 @@
-/*
- * Copyright (c) 2026 Hamza Soofi, Gurpal Johal, Mohil Kadakia, Ayaan Tunio
- * SPDX-License-Identifier: Apache-2.0
- */
-
 `default_nettype none
 
 // Transfers the external sample request into the system-clock domain and
-// produces a one-cycle pulse for each synchronized rising edge.
+// produces a one-cycle pulse for each synchronized rising edge
 //
 // The chain resets to all ones. A strobe that is already high when reset
-// releases therefore never looks like a new request: it must be seen low first.
+// releases therefore never looks like a new request: it must be seen low first
 module strobe_sync (
     input  wire clk,
     input  wire rst_n,
