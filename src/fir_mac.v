@@ -1,22 +1,17 @@
-/*
- * Copyright (c) 2026 Hamza Soofi, Gurpal Johal, Mohil Kadakia, Ayaan Tunio
- * SPDX-License-Identifier: Apache-2.0
- */
-
 `default_nettype none
 
-// Shared signed multiplier and accumulator.
+// Shared signed multiplier and accumulator
 //
-// |product| <= 128 * 128 = 16384, so eight products sum to at most 131072 in
-// magnitude, which the 20-bit accumulator holds without overflow.
+// |product| <= 128 * 128 = 16384
+// eight products sum to at most 131072 in magnitude (20 bit accumulator holds without overflow)
 module fir_mac (
-    input  wire        clk,
-    input  wire        rst_n,
-    input  wire        clear,
-    input  wire        enable,
-    input  wire [ 7:0] sample,
-    input  wire [ 8:0] coef,
-    output reg  [19:0] acc
+    input  wire clk,
+    input  wire rst_n,
+    input  wire clear,
+    input  wire enable,
+    input  wire [7:0] sample,
+    input  wire [8:0] coef,
+    output reg [19:0] acc
 );
 
   wire signed [ 7:0] sample_s = sample;
