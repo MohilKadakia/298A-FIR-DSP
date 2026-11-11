@@ -1,7 +1,7 @@
 # TinyFIR Final Report
 
 **Team:** Hamza Soofi, Gurpal Johal, Mohil Kadakia, and Ayaan Tunio  
-**Status:** RTL and simulation are complete and passing. Place and route, the Tiny Tapeout precheck, and timing signoff have not been run, so the design is not yet ready to submit.
+**Status:** RTL, simulation and the official Tiny Tapeout flow all pass for commit `c3968f1` (branch `heh`, CI run 42127859566). The layout meets 10 MHz at every signoff corner. Its slow-corner margin is thinner than it needs to be because of a flow buffering choice, described in section 6.
 
 ## 1. Summary
 
@@ -13,11 +13,11 @@ TinyFIR is a programmable 8-tap FIR filter for a 1x2 Tiny Tapeout tile on GF180.
 | Sample rate at 10 MHz | 500 ksample/s | Met, with no dropped or duplicated samples | Simulation at random phases |
 | Fastest contract-legal rate at 10 MHz | Not specified | 769 ksample/s (13 clocks per sample) | Simulation at random phases |
 | Random arithmetic against the model | At least 10,000 samples | 10,240 samples, 1,549 of them clipped, all exact | Simulation |
-| Cell area | Fit the 112,783 µm² die | About 38,000 to 45,000 µm² (34% to 40%) | Synthesis estimate, before layout |
-| Timing at 10 MHz (100 ns) | Close timing | About 25 ns of logic at the slow corner | Synthesis estimate, no wires |
-| Physical checks | Pass | **Not run** | See section 6 |
+| Cell area | Fit the 112,783 µm² die | 60,267 µm² of standard cells, 55.8% of the core | Final layout |
+| Timing at 10 MHz (100 ns) | Met at every corner | Met at all 9 corners. Worst setup slack 13.4 ns, worst hold slack 0.19 ns | Post-route static timing |
+| Physical checks | Pass | Precheck 12 of 12, Magic and KLayout DRC clean, LVS match, no antenna violations | Tiny Tapeout CI |
 
-The final simulation results hold on RTL and on the post-synthesis GF180 netlist. They have not yet been repeated on the final placed-and-routed netlist.
+All 28 system tests pass on RTL, on the post-synthesis netlist, and in CI on the final placed-and-routed netlist.
 
 ## 2. Design
 
@@ -39,7 +39,7 @@ For each accepted strobe, the circuit captures the sample, clears the accumulato
 | Wrapper | [project.v](../src/project.v) | 9 | 0 |
 | **Total** | | **38,267** | **215** |
 
-These figures are from area-oriented Yosys synthesis with the `tt_025C_3v30` library. They exclude the clock tree, repair buffers, and tap cells. Mapping for speed gives 45,236 µm².
+These figures are from area-oriented Yosys synthesis with the `tt_025C_3v30` library, before layout. They exclude the clock tree, repair buffers, and tap cells. The flow's own synthesis came to 40,829 µm², and the final layout to 60,267 µm² (section 6).
 
 ## 3. Decisions the proposal left open
 
@@ -53,7 +53,7 @@ The proposal deferred these choices until implementation.
 | SPI readback | Separate read mux | Reads never disturb a calculation, at a measured cost of about 1,100 µm² |
 | Reset | Asserts asynchronously, releases on a clock edge | All flops leave reset in the same cycle, and gate-level simulation has no X problems |
 | Strobe high through reset | `ready` stays low until the strobe is seen low | A strobe left high never captures a stray sample |
-| Clock constraint | `CLOCK_PERIOD` raised from 20 ns to 100 ns | Matches the 10 MHz target. The estimated slow-corner path of about 25 ns would probably fail the template's 20 ns |
+| Clock constraint | `CLOCK_PERIOD` raised from 20 ns to 100 ns | Matches the 10 MHz target. The signed-off layout needs 86.6 ns at its slowest corner (section 6) |
 
 Two small additions go beyond the proposal: a sticky `STATUS` flag for requests dropped while busy, and a `CONTROL` bit that clears the status flags. Both make host errors visible through the pins.
 
@@ -63,7 +63,7 @@ The accumulator's top bit is redundant, because the largest magnitude, 131,072, 
 
 There are three levels of test.
 
-- **System tests:** 28 cocotb tests that use only the chip's pins, so the same file runs on RTL and gate-level netlists. All 28 pass on both.
+- **System tests:** 28 cocotb tests that use only the chip's pins, so the same file runs on RTL and gate-level netlists. All 28 pass on RTL, on the post-synthesis netlist, and in CI on the final placed-and-routed netlist with power pins.
 - **Module tests:** 16 tests across 7 blocks, including exhaustive sweeps. All pass.
 - **Reference model tests:** 29 tests that check the integer model against hand-worked values and the proposal's formula. All pass.
 
@@ -78,7 +78,7 @@ There are three levels of test.
 | Variable-rate input | `test_variable_rate`, `test_fastest_contract_rate`, `test_minimum_strobe_low_time`, `test_latency_budget`, `test_strobe_contract`, `test_host_too_slow_to_watch_ready` | Pass |
 | Busy handling | `test_busy_handling`, `test_coefficient_write_during_calculation`, `test_clear_history_during_calculation`, `test_spi_read_during_calculation` | Pass |
 | Low-pass, high-pass, and band-pass demonstrations | `test_lowpass_demo`, `test_highpass_demo`, `test_bandpass_demo` | Pass |
-| Physical implementation | Not a simulation test | **Not run** |
+| Physical implementation | Tiny Tapeout `gds`, `precheck` and `gl_test` jobs | Pass, see section 6 |
 
 The module tests cover every legal sample and coefficient product (65,792 pairs), every value of the scaled accumulator (8,192), all 65,536 SPI data words, and all 256 command bytes.
 
@@ -116,30 +116,77 @@ The low-pass stopband measures 10 dB better than designed because its output is 
 
 The limits were set after evaluating the quantized coefficients and before final verification, as the proposal required. That evaluation changed the band-pass design. The first attempt, a windowed filter with its DC gain corrected by one tap, lost its symmetry and reached only about -15 dB at the high tone. The final seven-tap least-squares design reaches -30 dB at both outer tones. Its DC gain is -9/128, about -23 dB, which is acceptable here because the demonstration tones have no DC component.
 
-## 6. Physical implementation status
+## 6. Physical implementation
 
-**The official flow has not been run.** It needs LibreLane with OpenROAD, Magic, and Netgen, which are not installed on the development machine. The prebuilt OpenROAD versions available are older than the LibreLane 3.0.14 that the Tiny Tapeout action uses, so a local run could not stand in for signoff.
+The official Tiny Tapeout flow (tt-gds-action `ttgf26c`, LibreLane 3.0.14) hardened commit `c3968f1` in GitHub Actions run 42127859566. Every job passed: `gds`, `precheck`, `gl_test` and `viewer`.
 
-What has been checked:
+![Final layout of the 1x2 tile](figures/layout.png)
 
-- A local copy of Tiny Tapeout's project tooling accepts `info.yaml`, the source list, and the datasheet. It resolves the die to 346.64 x 325.36 µm.
-- Synthesis with the GF180 7-track library at the flow's 3.3 V corners gives these estimates, with no wires or clock tree:
+| Check | Result |
+|---|---|
+| Tiny Tapeout precheck | 12 of 12 checks pass, including a full KLayout GF180MCU DRC (0 violations across 739 rule categories) and an antenna check |
+| Magic DRC | 0 errors |
+| LVS | Circuits match uniquely: 1,960 devices, 1,971 nets and all 45 pins |
+| Antenna | 0 violations, no diodes needed |
+| Detailed routing | 0 violations after four iterations |
+| IR drop | 0.09 mV at worst |
+| Power | 4.60 mW at the typical corner, a vectorless estimate |
+| Gate-level test | All 28 system tests pass on the final netlist with power pins |
 
-| Corner | Estimated critical path | Slack against 100 ns |
-|---|---:|---:|
-| `tt_025C_3v30` | 12.2 ns | 87.8 ns |
-| `ss_125C_3v00` | 24.6 ns | 75.4 ns |
-| `ff_n40C_3v60` | 6.9 ns | 93.1 ns |
+The gate-level simulation is zero-delay, because the cell models' timing is switched off. It shows that the routed netlist behaves exactly like the RTL, but says nothing about timing, which comes from static timing analysis alone.
 
-- In the synthesized netlist, every data and status output comes directly from a flop, there are no latches, and the only input-to-output path is chip select to the MISO enable, as intended.
+### Timing
 
-What remains is to push the repository so the `gds` workflow can run. That job builds the layout and runs the precheck. It then repeats the system tests on the final gate-level netlist. Density, routing congestion, and hold timing are unknown until then, though the low utilization estimate suggests that fitting should not be a problem.
+Setup and hold are met at all nine signoff corners, with no violations. The slow corners limit setup and the fast corners limit hold. Every critical path starts at the tap counter, runs through the sample and coefficient selection and the multiplier, and ends in the accumulator.
+
+| Corner | Setup slack, register to register | Minimum clock period | Worst hold slack |
+|---|---:|---:|---:|
+| Typical: `nom_tt_025C_3v30` | 58.0 ns | 42.0 ns (23.8 MHz) | 0.54 ns |
+| Slow: `nom_ss_125C_3v00` | 14.8 ns | 85.2 ns (11.7 MHz) | 1.38 ns |
+| Fast: `nom_ff_n40C_3v60` | 76.2 ns | 23.8 ns (42.0 MHz) | 0.19 ns |
+| Slowest of all nine: `max_ss_125C_3v00` | 13.4 ns | 86.6 ns (11.5 MHz) | 1.38 ns |
+
+The worst hold slack over all corners, 0.19 ns at `min_ff_n40C_3v60`, is between the reset synchronizer's two back-to-back flops, which is expected. Paths to and from the pins have at least 54 ns of slack even at the slowest corner.
+
+### Why the slow-corner margin is thin
+
+To fix fanout and slew, the layout tool inserted 146 buffers of type `dlyb_1`, a delay cell. The GF180 library describes it as an ordinary buffer, and in the slow-corner library it ranks as the weakest buffer by 0.06%, so OpenROAD picks it. Ten of these cells sit on the worst path and add 43.6 ns of its 88.3 ns at the slowest corner.
+
+Adding the twelve delay cells (`gf180mcu_fd_sc_mcu7t5v0__dlya_1` through `__dlyd_4`) to `EXTRA_EXCLUDED_CELLS` in `src/config.json` would stop this. Estimated from the library's tables, it should give about 25 ns more slow-corner setup slack and save about 3,200 µm². That estimate needs another CI run to confirm. The change is optional, since the layout already meets 10 MHz.
+
+### Electrical rule warnings
+
+The flow reports max-slew, max-capacitance and max-fanout violations, which Tiny Tapeout's configuration does not treat as failures.
+
+- **Max slew:** 440 pins exceed the flow's 3 ns limit at the slowest corner, 88 at the typical corner, and none at the fast corners. 98% are on nets driven by the delay-cell buffers, which have only x1 drive. Every slew stays inside the library's characterized range, so the timing above is interpolated, not extrapolated. Excluding the delay cells is not expected to clear these on its own, because the replacement `buf_1` has the same output drive.
+- **Max capacitance:** 2 nets, at 0.208 pF and 0.202 pF against a 0.2 pF limit, and only at the max-RC corners.
+- **Max fanout:** 14 clock-tree leaf buffers each drive 12 to 17 flops against a limit of 10, which is normal for a clock tree.
+
+None of these causes a functional problem at 10 MHz. No clock net is affected, and every setup, hold, recovery and removal check passes.
+
+### Area
+
+The flow's synthesis came to 40,829 µm², inside the estimate in section 2. The final 60,267 µm² of standard cells (55.8% of the core) adds 8,535 µm² of repair buffers, 5,591 µm² from upsized cells, 3,806 µm² of tap and endcap cells, and 1,506 µm² of clock tree. Fill takes most of the remaining space.
+
+### Pre-layout estimates against signoff
+
+Before CI ran, a quick synthesis estimate put the critical path at 12.2, 24.6 and 6.9 ns at the typical, slow and fast corners. The signed-off register-to-register paths are 42.0, 85.2 and 23.8 ns, about 3.45 times longer. At the typical corner the gap breaks down roughly as follows:
+
+- 9 ns from the flow's area-oriented synthesis
+- 6 ns of timing terms the estimate left out
+- 4 ns of wire load
+- 14 ns from the delay cells
+- 3 ns saved by buffering
+
+The estimate was good enough to choose the 100 ns constraint, but too optimistic to quote as margin.
 
 ## 7. Known limits
 
 - **Short `ready` and `output_valid` pulses.** `ready` is low for 9 clocks and `output_valid` lasts 1. A slow polling host can miss both, so the datasheet gives a fixed-delay procedure, which `test_host_too_slow_to_watch_ready` covers.
 - **Reset with SPI active.** If reset releases while chip select is low and SCLK is high, the first SCLK level counts as a clock. A write in that frame is rejected and flagged, so it fails safely. This state is outside SPI mode 0 idle.
-- **Simulation cannot show metastability.** The synchronizers follow standard practice, but only silicon can test them. Simulation also uses zero or unit delays, so real timing depends on the signoff run.
+- **Simulation cannot show metastability.** The synchronizers follow standard practice, but only silicon can test them. Gate-level simulation is zero-delay, so timing evidence comes only from static timing analysis.
+- **Slow-corner headroom.** At the slowest corner the layout supports about 11.5 MHz, roughly 15% above the 10 MHz target, until the delay-cell change in section 6 is made.
+- **Electrical warnings.** The max-slew, max-capacitance and max-fanout warnings in section 6 were reviewed and accepted, and they remain in the layout.
 - **No silicon testing.** Testing the chip depends on fabrication and delivery dates.
 
 ## 8. How to reproduce
