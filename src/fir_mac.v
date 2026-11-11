@@ -14,8 +14,8 @@ module fir_mac (
     output reg [19:0] acc
 );
 
-  wire signed [ 7:0] sample_s = sample;
-  wire signed [ 8:0] coef_s = coef;
+  wire signed [7:0] sample_s = sample;
+  wire signed [8:0] coef_s = coef;
   /* verilator lint_off WIDTHEXPAND */
   wire signed [16:0] product = sample_s * coef_s;
   /* verilator lint_on WIDTHEXPAND */
