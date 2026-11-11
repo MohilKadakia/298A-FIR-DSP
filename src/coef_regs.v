@@ -1,7 +1,3 @@
-/*
- * Copyright (c) 2026 Hamza Soofi, Gurpal Johal, Mohil Kadakia, Ayaan Tunio
- * SPDX-License-Identifier: Apache-2.0
- */
 
 `default_nettype none
 
