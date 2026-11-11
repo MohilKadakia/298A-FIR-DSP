@@ -16,12 +16,40 @@ module tt_um_example (
     input  wire       rst_n     // reset_n - low to reset
 );
 
-  // All output pins must be assigned. If not used, assign to 0.
-  assign uo_out  = ui_in + uio_in;  // Example: ou_out is the sum of ui_in and uio_in
-  assign uio_out = 0;
-  assign uio_oe  = 0;
+// uio_in[0] tells us when a new sample should be accepted 
+wire sample_strobe; 
 
-  // List all unused inputs to prevent warnings
-  wire _unused = &{ena, clk, rst_n, 1'b0};
+assign sample_strobe = uio_in[0];
+
+// Store one signed 8-bit sample 
+reg signed [7:0] sample; 
+
+
+    always @(posedge clk) begin
+
+        // Reset the sample to 0
+        if (!rst_n) begin
+            sample <= 8'sd0;
+        end
+
+        // If a new sample is ready, store ui_in
+        else if (sample_strobe) begin
+            sample <= $signed(ui_in);
+        end
+
+    end
+
+// Send the stored sample to the output pins 
+assign uo_out = sample;
+
+// Default output uio output pin yet 
+assign uio_out = 8'b00000000;
+
+// Output enable set to 0's dont know what pins we want for output 
+assign uio_oe = 8'b00000000;
+
+
+// Ignore the other 7 input pins for now 
+wire _unused = &{ena, uio_in[7:1], 1'b0};
 
 endmodule
