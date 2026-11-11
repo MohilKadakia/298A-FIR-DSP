@@ -5,8 +5,13 @@
 SIM ?= icarus
 FST ?= -fst # Use more efficient FST format
 TOPLEVEL_LANG ?= verilog
-SRC_DIR = $(PWD)/../src
-PROJECT_SOURCES = project.v
+SRC_DIR = $(CURDIR)/../src
+PROJECT_SOURCES = project.v reset_sync.v sync_2ff.v fir_core.v strobe_sync.v \
+                  fir_controller.v sample_history.v coef_regs.v fir_mac.v \
+                  output_stage.v spi_interface.v
+
+# The tests import the reference model:
+export PYTHONPATH := $(CURDIR)/../model:$(PYTHONPATH)
 
 ifneq ($(GATES),yes)
 
@@ -27,15 +32,20 @@ VERILOG_SOURCES += $(PDK_ROOT)/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/verilo
 VERILOG_SOURCES += $(PDK_ROOT)/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/verilog/gf180mcu_fd_sc_mcu7t5v0.v
 
 # this gets copied in by the GDS action workflow
-VERILOG_SOURCES += $(PWD)/gate_level_netlist.v
+VERILOG_SOURCES += $(CURDIR)/gate_level_netlist.v
 
 endif
 
 # Allow sharing configuration between design and testbench via `include`:
 COMPILE_ARGS 		+= -I$(SRC_DIR)
 
+# `make WAVES=all` dumps the whole hierarchy instead of only the pins:
+ifeq ($(WAVES),all)
+COMPILE_ARGS    += -DDUMP_ALL
+endif
+
 # Include the testbench sources:
-VERILOG_SOURCES += $(PWD)/tb.v
+VERILOG_SOURCES += $(CURDIR)/tb.v
 TOPLEVEL = tb
 
 # List test modules to run, separated by commas and without the .py suffix:
