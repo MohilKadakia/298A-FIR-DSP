@@ -4,6 +4,10 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, FallingEdge
 
+from fir_model import NUM_TAPS
+
+HALF = NUM_TAPS // 2
+
 
 async def start(dut):
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
@@ -18,21 +22,23 @@ async def start(dut):
 
 
 async def read_all(dut):
-    values = []
-    for tap in range(8):
+    """Read x[n] .. x[n-15]: tap slot k gives x[n-k] low and x[n-k-8] high."""
+    values = [None] * NUM_TAPS
+    for tap in range(HALF):
         dut.tap.value = tap
         await FallingEdge(dut.clk)
-        values.append(dut.sample_tap.value.to_unsigned())
+        values[tap] = dut.sample_lo.value.to_unsigned()
+        values[tap + HALF] = dut.sample_hi.value.to_unsigned()
     return values
 
 
 @cocotb.test()
 async def test_shift_hold_and_clear(dut):
     await start(dut)
-    assert await read_all(dut) == [0] * 8, "history resets to zero"
+    assert await read_all(dut) == [0] * NUM_TAPS, "history resets to zero"
 
     rng = random.Random(21)
-    shadow = [0] * 8
+    shadow = [0] * NUM_TAPS
     for _ in range(400):
         clear = rng.random() < 0.05
         accept = rng.random() < 0.5
@@ -45,7 +51,7 @@ async def test_shift_hold_and_clear(dut):
         dut.accept.value = 0
         # The bus is ignored unless accepted, and a simultaneous clear keeps the sample.
         if clear:
-            shadow = [value if accept else 0] + [0] * 7
+            shadow = [value if accept else 0] + [0] * (NUM_TAPS - 1)
         elif accept:
             shadow = [value] + shadow[:-1]
         dut.sample_in.value = rng.randrange(256)
