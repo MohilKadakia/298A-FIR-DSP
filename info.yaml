@@ -1,9 +1,9 @@
 # Tiny Tapeout project information
 project:
-  title:        "TinyFIR: SPI-Programmable 8-Tap FIR Filter" # Project title
+  title:        "TinyFIR: SPI-Programmable 16-Tap FIR Filter" # Project title
   author:       "Hamza Soofi, Gurpal Johal, Mohil Kadakia, Ayaan Tunio" # Your name
   discord:      "Gurpal, Yaboihazmat, mohil0, souprage"      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
-  description:  "Programmable 8-tap FIR filter with SPI-configurable coefficients" # One line description of what your project does
+  description:  "Programmable 16-tap FIR filter with SPI-configurable coefficients" # One line description of what your project does
   language:     "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
   clock_hz:     10000000 # Clock frequency in Hz (or 0 if not applicable)
 
