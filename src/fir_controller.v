@@ -1,9 +1,9 @@
 `default_nettype none
 
-// Sequences one sample through the shared multiplier-accumulator
+// Sequences one sample through the two-multiplier accumulator
 //
 //   edge 0     accept: history shifts, accumulator clears, ready falls
-//   edge 1-8   one tap accumulated per clock
+//   edge 1-8   tap slot k = 0..7 accumulates taps k and k + 8 in one clock
 //   edge 9     publish: output register loads, output_valid and ready rise
 //
 // INIT holds ready low after reset until the strobe synchronizer has flushed

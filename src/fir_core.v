@@ -24,17 +24,20 @@ module fir_core (
   wire overrun;
   wire [2:0] tap;
 
-  wire [2:0] coef_read_addr;
+  wire [3:0] coef_read_addr;
   wire [8:0] coef_read_data;
   wire coef_write_en;
-  wire [2:0] coef_write_addr;
+  wire [3:0] coef_write_addr;
   wire [8:0] coef_write_data;
   wire clear_history;
   wire clear_flags;
   wire write_rejected;
 
-  wire [7:0] sample_tap;
-  wire [8:0] coef_tap;
+  // Tap slot k reads taps k (lo) and k + 8 (hi) together.
+  wire [7:0] sample_lo;
+  wire [7:0] sample_hi;
+  wire [8:0] coef_lo;
+  wire [8:0] coef_hi;
   wire [19:0] acc;
 
   reg rejected_flag_q;
@@ -69,7 +72,8 @@ module fir_core (
       .clear     (clear_history),
       .sample_in (sample_in),
       .tap       (tap),
-      .sample_tap(sample_tap)
+      .sample_lo (sample_lo),
+      .sample_hi (sample_hi)
   );
 
   coef_regs u_coefs (
@@ -79,19 +83,22 @@ module fir_core (
       .write_addr(coef_write_addr),
       .write_data(coef_write_data),
       .tap       (tap),
-      .coef_tap  (coef_tap),
+      .coef_lo   (coef_lo),
+      .coef_hi   (coef_hi),
       .read_addr (coef_read_addr),
       .read_data (coef_read_data)
   );
 
   fir_mac u_mac (
-      .clk   (clk),
-      .rst_n (rst_n),
-      .clear (accept),
-      .enable(mac_enable),
-      .sample(sample_tap),
-      .coef  (coef_tap),
-      .acc   (acc)
+      .clk      (clk),
+      .rst_n    (rst_n),
+      .clear    (accept),
+      .enable   (mac_enable),
+      .sample_lo(sample_lo),
+      .coef_lo  (coef_lo),
+      .sample_hi(sample_hi),
+      .coef_hi  (coef_hi),
+      .acc      (acc)
   );
 
   output_stage u_output (
