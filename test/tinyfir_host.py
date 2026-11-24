@@ -12,12 +12,14 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, FallingEdge, RisingEdge, Timer
 
+from fir_model import NUM_TAPS
+
 CLK_PERIOD_NS = 100
 SPI_HALF_PERIOD_NS = 500  # SCLK at one tenth of the 10 MHz system clock
 
-REG_COEF0 = 0x0
-REG_STATUS = 0x8
-REG_CONTROL = 0x9
+REG_COEF0 = 0x00
+REG_STATUS = 0x10
+REG_CONTROL = 0x11
 CMD_READ = 0x80
 
 STATUS_READY = 1 << 0
@@ -27,8 +29,6 @@ STATUS_OVERRUN = 1 << 3
 
 CONTROL_CLEAR_HISTORY = 1 << 0
 CONTROL_CLEAR_FLAGS = 1 << 1
-
-NUM_TAPS = 8
 
 
 def to_bits(value: int, width: int) -> list[int]:

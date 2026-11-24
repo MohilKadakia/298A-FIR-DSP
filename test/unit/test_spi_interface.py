@@ -7,7 +7,10 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, FallingEdge
 
-from fir_model import COEF_MAX, COEF_MIN
+from fir_model import COEF_MAX, COEF_MIN, NUM_TAPS
+
+ADDR_STATUS = 0x10
+ADDR_CONTROL = 0x11
 
 
 async def start(dut):
@@ -68,15 +71,16 @@ async def test_every_16_bit_write_value(dut):
     """All 65,536 data words are classified correctly."""
     await start(dut)
     accepted = 0
+    target = 13  # uses all four coefficient address bits
     for word in range(0x10000):
-        _, events = await frame(dut, bits_of(5, 8) + bits_of(word, 16), half=2, gap=4)
+        _, events = await frame(dut, bits_of(target, 8) + bits_of(word, 16), half=2, gap=4)
         signed = word - 0x10000 if word >= 0x8000 else word
         legal = COEF_MIN <= signed <= COEF_MAX
         assert events["we"] == int(legal), f"word 0x{word:04x}: {events}"
         assert events["rejected"] == int(not legal), f"word 0x{word:04x}: {events}"
         if legal:
             accepted += 1
-            assert events["addr"] == 5
+            assert events["addr"] == target
             assert events["data"] == signed & 0x1FF, f"word 0x{word:04x}: {events}"
     assert accepted == COEF_MAX - COEF_MIN + 1
 
@@ -87,15 +91,15 @@ async def test_every_command_byte(dut):
     await start(dut)
     for command in range(256):
         is_read = bool(command & 0x80)
-        reserved_clear = (command & 0x70) == 0
-        addr = command & 0x0F
+        reserved_clear = (command & 0x60) == 0
+        addr = command & 0x1F
         _, events = await frame(dut, bits_of(command, 8) + bits_of(1, 16))
         if is_read:
             assert events["rejected"] == 0 and events["we"] == 0, f"read 0x{command:02x}: {events}"
             assert events["clear_history"] == 0, f"read 0x{command:02x}: {events}"
-        elif reserved_clear and addr < 8:
+        elif reserved_clear and addr < NUM_TAPS:
             assert events["we"] == 1 and events["addr"] == addr, f"0x{command:02x}: {events}"
-        elif reserved_clear and addr == 9:
+        elif reserved_clear and addr == ADDR_CONTROL:
             assert events["clear_history"] == 1 and events["rejected"] == 0, f"0x{command:02x}"
         else:
             assert events["rejected"] == 1 and events["we"] == 0, f"0x{command:02x}: {events}"
@@ -109,7 +113,7 @@ async def test_read_data_paths(dut):
     for _ in range(200):
         raw = rng.randrange(512)
         dut.coef_read_data.value = raw
-        index = rng.randrange(8)
+        index = rng.randrange(NUM_TAPS)
         received, _ = await frame(
             dut, bits_of(0x80 | index, 8) + [rng.getrandbits(1) for _ in range(16)], half=5
         )
@@ -119,7 +123,7 @@ async def test_read_data_paths(dut):
 
     for status in range(16):
         dut.status.value = status
-        received, _ = await frame(dut, bits_of(0x88, 8) + [1] * 16, half=5)
+        received, _ = await frame(dut, bits_of(0x80 | ADDR_STATUS, 8) + [1] * 16, half=5)
         assert received[8:] == bits_of(status, 16)
 
 
@@ -128,7 +132,7 @@ async def test_calculation_blocks_all_writes(dut):
     """Every kind of write is rejected at the moment a calculation is running."""
     await start(dut)
     dut.calc_active.value = 1
-    for command, word in ((0x03, 16), (0x09, 1), (0x09, 2), (0x09, 3)):
+    for command, word in ((0x03, 16), (0x0E, 16), (ADDR_CONTROL, 1), (ADDR_CONTROL, 2), (ADDR_CONTROL, 3)):
         _, events = await frame(dut, bits_of(command, 8) + bits_of(word, 16))
         assert events["we"] == 0 and events["clear_history"] == 0 and events["clear_flags"] == 0
         assert events["rejected"] == 1, f"0x{command:02x} {word}: {events}"
