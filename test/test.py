@@ -31,6 +31,17 @@ MAX_RATE_PERIOD_PS = 20 * CLK_PERIOD_NS * 1000  # 500 ksample/s at 10 MHz
 MAX_INTERNAL_LATENCY_CYCLES = 16
 
 
+def taps(*leading: int) -> list[int]:
+    """A full coefficient set: the given leading taps, then zeros."""
+    return list(leading) + [0] * (NUM_TAPS - len(leading))
+
+
+def single_tap(index: int, value: int) -> list[int]:
+    coefficients = [0] * NUM_TAPS
+    coefficients[index] = value
+    return coefficients
+
+
 async def start_host(dut, seed: int) -> TinyFirHost:
     host = TinyFirHost(dut, seed=seed)
     await host.start()
@@ -63,7 +74,7 @@ async def test_reset_defaults(dut):
     host = await start_host(dut, seed=101)
 
     # Dirty every piece of state so that reset has something to clear.
-    await host.write_coefs([100, -100, 50, -50, 25, -25, 128, -128])
+    await host.write_coefs([100, -100, 50, -50, 25, -25, 128, -128] * 2)
     await host.reg_write(REG_COEF0, 999)  # sets the rejected flag
     await host.run_samples([127, 127, -128, 90, -90, 5, 60, 127])
     assert dut.uo_out.value.to_unsigned() != 0, "the output should be non-zero before reset"
@@ -92,9 +103,9 @@ async def test_reset_defaults(dut):
     assert await host.read_all_coefs() == [COEF_RESET] * NUM_TAPS
     assert await host.read_status() == STATUS_READY
 
-    # The default is an eight-point moving average on empty history.
-    results = await host.run_samples([80] + [0] * 9)
-    assert [r[0] for r in results] == [10] * 8 + [0] * 2
+    # The default is a sixteen-point moving average on empty history.
+    results = await host.run_samples([80] + [0] * (NUM_TAPS + 1))
+    assert [r[0] for r in results] == [(80 * COEF_RESET) >> 7] * NUM_TAPS + [0] * 2
     assert all(r[1] == 0 for r in results)
 
 
@@ -147,30 +158,31 @@ async def test_strobe_high_through_reset_is_not_a_request(dut):
     dut.sample_strobe.value = 0
     await ClockCycles(dut.clk, 6)
     assert str(dut.ready.value) == "1"
-    assert await host.run_samples([80]) == [(10, 0)]
+    assert await host.run_samples([80]) == [((80 * COEF_RESET) >> 7, 0)]
 
 
 # ----- SPI configuration -----
 
 
-@cocotb.test(timeout_time=50, timeout_unit="ms")
+@cocotb.test(timeout_time=150, timeout_unit="ms")
 async def test_spi_write_and_readback(dut):
-    """All eight coefficients write and read back, including -1, 0 and +1."""
+    """All sixteen coefficients write and read back, including -1, 0 and +1."""
     host = await start_host(dut, seed=201)
+    shadow = await host.read_all_coefs()
     for value in (-128, 0, 128, -1, 1, 127, -127, 64, -64, 16):
         for index in range(NUM_TAPS):
-            shadow = await host.read_all_coefs()
             await host.reg_write(REG_COEF0 + index, value)
             shadow[index] = value
             assert await host.read_all_coefs() == shadow, f"write {value} to coefficient {index}"
     assert await host.read_status() == STATUS_READY
 
-    distinct = [-128, -77, -1, 0, 1, 42, 127, 128]
+    distinct = [-128, -77, -1, 0, 1, 42, 127, 100, -127, -64, -16, -2, 2, 16, 64, 128]
     await host.write_coefs(distinct)
     assert await host.read_all_coefs() == distinct
     # A read returns the sign extension across both data bytes.
     assert await host.reg_read(REG_COEF0) == 0xFF80
-    assert await host.reg_read(REG_COEF0 + 7) == 0x0080
+    assert await host.reg_read(REG_COEF0 + 8) == 0xFF81
+    assert await host.reg_read(REG_COEF0 + 15) == 0x0080
 
 
 @cocotb.test(timeout_time=100, timeout_unit="ms")
@@ -204,7 +216,7 @@ async def test_spi_value_range(dut):
 async def test_spi_invalid_commands(dut):
     """Bad addresses and reserved bits change nothing and are flagged."""
     host = await start_host(dut, seed=203)
-    coefficients = list(range(1, 9))
+    coefficients = list(range(1, NUM_TAPS + 1))
     await host.write_coefs(coefficients)
     expected = await host.read_all_coefs()
     model = FirModel(coefficients)
@@ -212,8 +224,11 @@ async def test_spi_invalid_commands(dut):
 
     # Each word is one that a real register would accept: 1 clears the history through
     # CONTROL, and 5 is a legal coefficient. A bad command must not let either through.
-    bad_commands = [REG_STATUS] + list(range(0xA, 0x10))  # read-only or unmapped
-    bad_commands += [(reserved << 4) | addr for reserved in range(1, 8) for addr in (0, 3, 7, 9)]
+    bad_commands = [REG_STATUS] + list(range(REG_CONTROL + 1, 0x20))  # read-only or unmapped
+    # Reserved bits 6:5 set on otherwise legal addresses, low and high coefficients included.
+    bad_commands += [
+        (reserved << 5) | addr for reserved in range(1, 4) for addr in (0x00, 0x03, 0x0F, REG_CONTROL)
+    ]
     for command in bad_commands:
         for word in (CONTROL_CLEAR_HISTORY, 5):
             await host.spi_frame(to_bits(command, 8) + to_bits(word, 16))
@@ -224,7 +239,8 @@ async def test_spi_invalid_commands(dut):
 
     # Reading anywhere is harmless. Unmapped reads and reads with reserved bits
     # return zero rather than aliasing onto a real register.
-    for command in list(range(0x9, 0x10)) + [0x10, 0x27, 0x38, 0x70]:
+    # Every coefficient is nonzero and STATUS shows ready, so an alias would return data.
+    for command in list(range(REG_CONTROL, 0x20)) + [0x20, 0x2F, 0x30, 0x4A, 0x50, 0x6F, 0x70]:
         received = await host.spi_frame(to_bits(0x80 | command, 8) + [1] * 16)
         assert not any(received), f"read command 0x{command:02x} returned data"
     await expect_status_flags(host, 0, "after reads")
@@ -389,10 +405,10 @@ async def test_uio_pin_directions(dut):
 async def test_status_and_control(dut):
     """Clearing history keeps coefficients, and the flags clear only on request."""
     host = await start_host(dut, seed=207)
-    coefficients = [128, 64, 32, 16, -16, -32, -64, -128]
+    coefficients = [128, 64, 32, 16, -16, -32, -64, -128, 100, -50, 25, -12, 6, -3, 1, -1]
     await host.write_coefs(coefficients)
     model = FirModel(coefficients)
-    samples = [100, -50, 25, 75, -125, 60, 3, 90]
+    samples = [100, -50, 25, 75, -125, 60, 3, 90, -10, 20, -30, 40, -50, 60, -70, 80]
     expect_results(await host.run_samples(samples), model.run(samples), "before clear")
     held_output = dut.uo_out.value.to_signed()
 
@@ -458,11 +474,14 @@ async def test_impulse_response(dut):
     """An impulse followed by zeros reads out the quantized coefficient set."""
     host = await start_host(dut, seed=301)
     sets = [design["coefficients"] for design in FILTER_DESIGNS.values()]
-    sets += [[128, 64, 32, 16, 8, 4, 2, 1], [-128, 77, -3, 0, 5, -99, 128, -1]]
+    sets += [
+        [128, 64, 32, 16, 8, 4, 2, 1, -1, -2, -4, -8, -16, -32, -64, -128],
+        [-128, 77, -3, 0, 5, -99, 128, -1, 64, -7, 0, 33, -128, 2, 91, -45],
+    ]
     for coefficients in sets:
         for height in (100, -100, 127, -128, 1, -1):
             await host.load_filter(coefficients)
-            samples = [height] + [0] * 10
+            samples = [height] + [0] * (NUM_TAPS + 2)
             expected = FirModel(coefficients).run(samples)
             expect_results(await host.run_samples(samples), expected, f"impulse {height}")
             # Check the model's shape directly as well, so it is not only compared
@@ -475,16 +494,18 @@ async def test_impulse_response(dut):
 async def test_unity_pass_through(dut):
     """With coefficient 0 at +1 the output equals the input for every input value."""
     host = await start_host(dut, seed=302)
-    await host.load_filter([128, 0, 0, 0, 0, 0, 0, 0])
+    await host.load_filter(single_tap(0, 128))
     every_value = list(range(-128, 128))
     random.Random(3021).shuffle(every_value)
     results = await host.run_samples(every_value)
     assert results == [(value, 0) for value in every_value]
 
-    # Moving the +1 to the last tap delays the stream by exactly seven samples.
-    await host.load_filter([0, 0, 0, 0, 0, 0, 0, 128])
-    results = await host.run_samples(every_value[:40])
-    assert results == [(value, 0) for value in [0] * 7 + every_value[:33]]
+    # A +1 on tap k delays the stream by exactly k samples. Taps 7 and 8 sit on either
+    # side of the split between the two multipliers, and tap 15 is the last.
+    for k in (7, 8, NUM_TAPS - 1):
+        await host.load_filter(single_tap(k, 128))
+        results = await host.run_samples(every_value[:40])
+        assert results == [(value, 0) for value in [0] * k + every_value[: 40 - k]], f"tap {k}"
 
 
 @cocotb.test(timeout_time=1000, timeout_unit="ms")
@@ -538,37 +559,40 @@ async def test_overflow_and_sign(dut):
 
     # (coefficients, samples, wanted final output, wanted final saturated flag)
     cases = [
-        # Full-scale extremes.
-        ([128] * 8, [127] * 8, 127, 1),
-        ([128] * 8, [-128] * 8, -128, 1),
-        ([-128] * 8, [-128] * 8, 127, 1),
-        ([-128] * 8, [127] * 8, -128, 1),
+        # Full-scale extremes. All sixteen taps at -128 x -128 reach A[n] = +2^18.
+        ([128] * NUM_TAPS, [127] * NUM_TAPS, 127, 1),
+        ([128] * NUM_TAPS, [-128] * NUM_TAPS, -128, 1),
+        ([-128] * NUM_TAPS, [-128] * NUM_TAPS, 127, 1),
+        ([-128] * NUM_TAPS, [127] * NUM_TAPS, -128, 1),
         # Largest and smallest results that fit without clipping.
-        ([128] + [0] * 7, [127], 127, 0),
-        ([128] + [0] * 7, [-128], -128, 0),
-        ([-128] + [0] * 7, [127], -127, 0),
+        (taps(128), [127], 127, 0),
+        (taps(128), [-128], -128, 0),
+        (taps(-128), [127], -127, 0),
+        # The same limits on the first and last taps of the second multiplier.
+        (single_tap(8, 128), [127] + [0] * 8, 127, 0),
+        (single_tap(NUM_TAPS - 1, -128), [-128] + [0] * (NUM_TAPS - 1), 127, 1),
         # A[n] = 16383 still floors to 127, and 16384 is the first value that clips.
-        ([128, 1] + [0] * 6, [127, 127], 127, 0),
-        ([128, 128] + [0] * 6, [127, 1], 127, 1),
+        (taps(128, 1), [127, 127], 127, 0),
+        (taps(128, 128), [127, 1], 127, 1),
         # A[n] = -16384 floors to exactly -128. One less is the first negative clip.
-        ([128, 0] + [0] * 6, [0, -128], -128, 0),
-        ([128, 1] + [0] * 6, [-1, -128], -128, 1),
+        (taps(128, 0), [0, -128], -128, 0),
+        (taps(128, 1), [-1, -128], -128, 1),
         # -128 * -128 is the one product that needs the top of the range.
-        ([-128] + [0] * 7, [-128], 127, 1),
-        ([128] + [0] * 7, [64], 64, 0),
+        (taps(-128), [-128], 127, 1),
+        (taps(128), [64], 64, 0),
         # Floor rounding: -1/128 gives -1, and +1/128 gives 0.
-        ([1] + [0] * 7, [-1], -1, 0),
-        ([1] + [0] * 7, [1], 0, 0),
-        ([64] + [0] * 7, [-1], -1, 0),
-        ([64] + [0] * 7, [1], 0, 0),
-        ([64] + [0] * 7, [3], 1, 0),
-        ([64] + [0] * 7, [-3], -2, 0),
-        ([-1] + [0] * 7, [-128], 1, 0),
-        ([-1] + [0] * 7, [127], -1, 0),
-        ([1] + [0] * 7, [127], 0, 0),
-        ([1, 1] + [0] * 6, [64, 64], 1, 0),
-        ([1, 1] + [0] * 6, [-64, -64], -1, 0),
-        ([1, 1] + [0] * 6, [-64, -65], -2, 0),
+        (taps(1), [-1], -1, 0),
+        (taps(1), [1], 0, 0),
+        (taps(64), [-1], -1, 0),
+        (taps(64), [1], 0, 0),
+        (taps(64), [3], 1, 0),
+        (taps(64), [-3], -2, 0),
+        (taps(-1), [-128], 1, 0),
+        (taps(-1), [127], -1, 0),
+        (taps(1), [127], 0, 0),
+        (taps(1, 1), [64, 64], 1, 0),
+        (taps(1, 1), [-64, -64], -1, 0),
+        (taps(1, 1), [-64, -65], -2, 0),
     ]
     for coefficients, samples, wanted_output, wanted_flag in cases:
         await host.load_filter(coefficients)
@@ -578,7 +602,7 @@ async def test_overflow_and_sign(dut):
         assert int(expected[-1].saturated) == wanted_flag, f"model flag: {coefficients}"
 
     # The saturated flag follows each result and holds between results.
-    await host.load_filter([128, 128] + [0] * 6)
+    await host.load_filter(taps(128, 128))
     results = await host.run_samples([127, 127, 0, 0, -128, -128, 0])
     assert results == [(127, 0), (127, 1), (127, 0), (0, 0), (-128, 0), (-128, 1), (-128, 0)]
     assert str(dut.saturated.value) == "0"
@@ -589,7 +613,7 @@ async def test_overflow_and_sign(dut):
     assert dut.uo_out.value.to_signed() == 127
 
     # The model's limit logic agrees with a direct statement of the formula.
-    for accumulator in (-131072, -16513, -16512, -16385, -16384, -1, 0, 127, 128, 16383, 16384, 131072):
+    for accumulator in (-262144, -16513, -16512, -16385, -16384, -1, 0, 127, 128, 16383, 16384, 262144):
         floor = math.floor(accumulator / 128)
         assert scale_and_saturate(accumulator) == (
             max(-128, min(127, floor)),
@@ -616,7 +640,7 @@ async def check_output_stable(dut):
 async def test_latency_budget(dut):
     """Latency stays inside its budget for every input phase."""
     host = await start_host(dut, seed=401)
-    await host.load_filter([128] + [0] * 7)
+    await host.load_filter(taps(128))
     rng = random.Random(4011)
 
     internal_latencies = set()
@@ -661,7 +685,7 @@ async def test_latency_budget(dut):
 async def test_variable_rate(dut):
     """No dropped or duplicated samples at any rate up to 500 ksample/s."""
     host = await start_host(dut, seed=402)
-    coefficients = [90, -40, 35, 12, -7, 20, -33, 11]
+    coefficients = [90, -40, 35, 12, -7, 20, -33, 11, 25, -18, 9, -4, 14, -22, 6, 3]
     rng = random.Random(4021)
     stability = cocotb.start_soon(check_output_stable(dut))
 
@@ -704,7 +728,7 @@ async def test_variable_rate(dut):
 async def test_fastest_contract_rate(dut):
     """Measure the margin: the contract holds at 13 clocks per sample, not only 20."""
     host = await start_host(dut, seed=403)
-    coefficients = [50, -20, 60, 8, -9, 33, -44, 21]
+    coefficients = [50, -20, 60, 8, -9, 33, -44, 21, -15, 27, -6, 12, 40, -31, 5, -2]
     rng = random.Random(4031)
     await host.load_filter(coefficients)
     samples = [rng.randint(-128, 127) for _ in range(400)]
@@ -721,7 +745,7 @@ async def test_fastest_contract_rate(dut):
 async def test_minimum_strobe_low_time(dut):
     """Exactly three clocks of strobe low re-arms the next request at any phase."""
     host = await start_host(dut, seed=409)
-    coefficients = [50, -20, 60, 8, -9, 33, -44, 21]
+    coefficients = [50, -20, 60, 8, -9, 33, -44, 21, -15, 27, -6, 12, 40, -31, 5, -2]
     rng = random.Random(4091)
     await host.load_filter(coefficients)
     samples = [rng.randint(-128, 127) for _ in range(400)]
@@ -750,7 +774,7 @@ async def test_host_too_slow_to_watch_ready(dut):
     within twelve, so holding the data for four clocks and reading at thirteen is enough.
     """
     host = await start_host(dut, seed=410)
-    coefficients = [50, -20, 60, 8, -9, 33, -44, 21]
+    coefficients = [50, -20, 60, 8, -9, 33, -44, 21, -15, 27, -6, 12, 40, -31, 5, -2]
     rng = random.Random(4101)
     await host.load_filter(coefficients)
     model = FirModel(coefficients)
@@ -775,7 +799,7 @@ async def test_host_too_slow_to_watch_ready(dut):
 async def test_strobe_contract(dut):
     """One rising edge makes one acceptance, and the data is taken at acceptance."""
     host = await start_host(dut, seed=404)
-    await host.load_filter([128] + [0] * 7)
+    await host.load_filter(taps(128))
 
     # A strobe held high for a long time captures once.
     dut.ui_in.value = 33
@@ -820,7 +844,7 @@ async def test_strobe_contract(dut):
 async def test_busy_handling(dut):
     """Requests made while busy are dropped, flagged, and harm nothing."""
     host = await start_host(dut, seed=405)
-    coefficients = [70, 40, 30, -20, 15, 10, -5, 2]
+    coefficients = [70, 40, 30, -20, 15, 10, -5, 2, 12, -9, 6, -3, 8, -4, 1, 1]
     await host.load_filter(coefficients)
     model = FirModel(coefficients)
     await host.run_samples([55, -66, 77])
@@ -893,11 +917,11 @@ async def test_busy_handling(dut):
 async def test_coefficient_write_during_calculation(dut):
     """A write landing at any clock around a calculation is atomic or rejected."""
     host = await start_host(dut, seed=406)
-    old = [20, -30, 40, -50, 60, -70, 80, -90]
-    prior = [5, -6, 7, -8, 9, -10, 11]  # small enough that nothing clips
+    old = [20, -30, 40, -50, 60, -70, 80, -90, 15, -25, 35, -45, 55, -65, 75, -85]
+    prior = [5, -6, 7, -8, 9, -10, 11, -12, 13, -14, 15, -16, 17, -18, 19]  # nothing clips
     sample = 15
     new_value = 120
-    target = 2
+    target = 10  # on the second multiplier
     new = list(old)
     new[target] = new_value
 
@@ -951,8 +975,8 @@ async def test_coefficient_write_during_calculation(dut):
 async def test_clear_history_during_calculation(dut):
     """A clear landing at any clock around a calculation never corrupts it."""
     host = await start_host(dut, seed=407)
-    coefficients = [20, 30, 40, 50, 60, 70, 80, 90]
-    prior = [50, 60, 70, 80, 90, 100, 110]
+    coefficients = [4, 6, 8, 10, 12, 14, 16, 18, 2, 4, 6, 8, 10, 12, 14, 16]
+    prior = [50, 60, 70, 80, 90, 100, 110, 50, 60, 70, 80, 90, 100, 110, 50]  # nothing clips
     sample = 55
 
     outcomes = {"rejected": 0, "cleared_before": 0, "cleared_after": 0}
@@ -1013,7 +1037,7 @@ async def test_clear_history_during_calculation(dut):
 async def test_spi_read_during_calculation(dut):
     """Reading over SPI while samples run returns correct data and disturbs nothing."""
     host = await start_host(dut, seed=408)
-    coefficients = [11, -22, 33, -44, 55, -66, 77, -88]
+    coefficients = [11, -22, 33, -44, 55, -66, 77, -88, 99, -110, 121, -128, 128, -7, 3, -1]
     await host.load_filter(coefficients)
     model = FirModel(coefficients)
     rng = random.Random(4081)
