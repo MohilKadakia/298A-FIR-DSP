@@ -18,6 +18,40 @@ jobs:
         with:
           pdk: gf180mcuD
 
+      # Workaround: tt-gds-action is meant to shrink gds_render.png with pngquant, but since ~2026-11-23
+      # that silently falls back to the raw RGBA render (~9 MB). GitHub's image proxy (camo) refuses
+      # images over 5 MB, so the viewer summary's "2D Preview" shows only a "png" link ("Content length
+      # exceeded"). Palette-quantize it here (Pillow is already installed by the action) and replace the
+      # artifact before the viewer job deploys it. This does nothing once upstream compresses it again.
+      - name: Compress PNG preview
+        id: compress_png
+        continue-on-error: true
+        run: |
+          python - <<'EOF'
+          import os
+          from PIL import Image
+
+          path = "gds_render.png"
+          im = Image.open(path)
+          before = os.path.getsize(path)
+          if im.mode == "P":
+              print(f"{path} is already palette-quantized ({before:,} bytes), leaving it alone")
+              raise SystemExit(0)
+          q = im.quantize(colors=256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
+          q.save(path, optimize=True)
+          print(f"{path}: {im.mode} {before:,} bytes -> palette {os.path.getsize(path):,} bytes")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("changed=true\n")
+          EOF
+
+      - name: Replace gds_render (png) artifact
+        if: steps.compress_png.outputs.changed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: gds_render
+          path: gds_render.png
+          overwrite: true
+
   precheck:
     needs: gds
     runs-on: ubuntu-24.04
